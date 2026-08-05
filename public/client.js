@@ -7,6 +7,13 @@ import { boostHsl, hslToRgb, hueToHsl } from './client_color.js';
 import { filterAndSortRooms } from './client_rooms.js';
 import { commitBestPct as commitBest, sortPlayersByScore } from './client_stats.js';
 import {
+  keepUnsent,
+  loadDesired,
+  planDesiredApply,
+  saveDesired,
+  setDesired
+} from './client_cos_desired.js';
+import {
   COSMETICS_CATS,
   COSMETICS_MAX_ID,
   bitHas,
@@ -1298,7 +1305,6 @@ let pendingCosmeticsOp = null;
 let cosmeticsOpTimer = 0;
 
 const COSMETICS_CACHE_KEY = 'snakes_cosmetics_cache_v1';
-const COSMETICS_DESIRED_KEY = 'snakes_cosmetics_desired_v1';
 
 let styleToastAcc = 0;
 let styleToastReason = 0;
@@ -6284,77 +6290,36 @@ function onCosmetics(msg) {
   } catch {}
 }
 
-function cosmeticsDesiredLoad() {
-  try {
-    const raw = localStorage.getItem(COSMETICS_DESIRED_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw);
-    if (!s || typeof s !== 'object') return null;
-    return s;
-  } catch {
-    return null;
-  }
-}
-
-function cosmeticsDesiredSave(s) {
-  try {
-    if (!s) {
-      localStorage.removeItem(COSMETICS_DESIRED_KEY);
-      return;
-    }
-    localStorage.setItem(COSMETICS_DESIRED_KEY, JSON.stringify(s));
-  } catch {}
-}
-
+/* Модель «желаемой» экипировки — в client_cos_desired.js вместе с тестами.
+   Здесь остаётся только подстановка хранилища. */
 function cosmeticsSetDesiredEq(cat, id) {
-  const c = String(cat || '').trim().toLowerCase();
-  const itemId = Math.max(0, Math.min(7, Number(id) || 0));
-  const d = cosmeticsDesiredLoad() || {};
-  if (c === 'capturefx') d.eqCaptureFx = itemId;
-  else if (c === 'head') d.eqHead = itemId;
-  else if (c === 'seg') d.eqSeg = itemId;
-  else if (c === 'nameplate') d.eqNameplate = itemId;
-  else if (c === 'frame') d.eqFrame = itemId;
-  else if (c === 'terr') d.eqTerr = itemId;
-  else if (c === 'death') d.eqDeath = itemId;
-  cosmeticsDesiredSave(d);
+  setDesired(localStorage, cat, id);
 }
 
+/* Применить сохранённый выбор к серверу. Решение «что кому отправить»
+   принимает planDesiredApply в client_cos_desired.js — здесь только отправка
+   и разговор с игроком. Раньше соответствие «категория -> поле» было выписано
+   тут семью строками подряд, дублируя такую же цепочку в записи выбора. */
 function cosmeticsApplyDesiredServer() {
   if (cosmeticsSource !== 'server') return;
-  const d = cosmeticsDesiredLoad();
-  if (!d) return;
 
-  const failed = [];
-  const kept = {};
+  const { toSend, missing } = planDesiredApply({
+    desired: loadDesired(localStorage),
+    inventory: cosmeticsMaskForCat,
+    equipped: cosmeticsEqForCat
+  });
 
-  const apply = (cat, desiredId, invMask, currentEq, keyName) => {
-    if (desiredId === undefined || desiredId === null) return;
-    const want = Math.max(0, Math.min(7, Number(desiredId) || 0));
-    if (want === Math.max(0, Math.min(7, Number(currentEq) || 0))) return;
-    const bit = 1 << want;
-    if ((Number(invMask) & bit) === 0) {
-      // C9: the cache promised an item the account does not have — say so out loud.
-      failed.push(`${cosmeticsLabel(cat)} — ${cosmeticsVariantName(cat, want)}`);
-      return;
-    }
-    if (!wsSend('cosmeticsEquip', { cat, id: want })) kept[keyName] = want;
-  };
+  const results = toSend.map((it) => ({
+    ...it,
+    ok: wsSend('cosmeticsEquip', { cat: it.cat, id: it.id })
+  }));
 
-  apply('capturefx', d.eqCaptureFx, youCosInvCaptureFx, youCosEqCaptureFx, 'eqCaptureFx');
-  apply('head', d.eqHead, youCosInvHead, youCosEqHead, 'eqHead');
-  apply('seg', d.eqSeg, youCosInvSeg, youCosEqSeg, 'eqSeg');
-  apply('nameplate', d.eqNameplate, youCosInvNameplate, youCosEqNameplate, 'eqNameplate');
-  apply('frame', d.eqFrame, youCosInvFrame, youCosEqFrame, 'eqFrame');
-  apply('terr', d.eqTerr, youCosInvTerr, youCosEqTerr, 'eqTerr');
-  apply('death', d.eqDeath, youCosInvDeath, youCosEqDeath, 'eqDeath');
-
-  if (failed.length) {
-    setCosmeticsStatus(() => `${t('cosmetics.desired_not_applied')}: ${failed.join(', ')}`, 'error');
+  if (missing.length) {
+    const names = missing.map((m) => `${cosmeticsLabel(m.cat)} — ${cosmeticsVariantName(m.cat, m.id)}`);
+    setCosmeticsStatus(() => `${t('cosmetics.desired_not_applied')}: ${names.join(', ')}`, 'error');
   }
 
-  // Keep only what could not be sent; drop everything that was applied or is impossible.
-  cosmeticsDesiredSave(Object.keys(kept).length ? kept : null);
+  saveDesired(localStorage, keepUnsent(results));
 }
 
 // C1: shop feedback goes into a dedicated in-overlay line (#cosmeticsStatus),
