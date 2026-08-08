@@ -14,6 +14,7 @@ import {
   cellSizeFor,
   clampToRoi,
   decayShake,
+  dirVec,
   followCamera,
   viewRectOf,
   visibleBounds
@@ -10028,9 +10029,7 @@ function draw() {
   if (fxEnabled && speedActive) {
     const dt = Math.min(40, nowFrame - (draw._spAt || nowFrame));
     draw._spAt = nowFrame;
-    const dir = my.d;
-    const dx = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
-    const dy = dir === 'up' ? -1 : dir === 'down' ? 1 : 0;
+    const [dx, dy] = dirVec(my.d);
     const bx = my.ix + 0.5 - dx * 0.55;
     const by = my.iy + 0.5 - dy * 0.55;
     const c = boostHsl(colors.get(you) || my.c || 'hsl(210 20% 60%)');
@@ -10507,13 +10506,6 @@ function draw() {
   }
 
   ctx.font = `12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-
-  const dirVec = (d) => {
-    if (d === 'up') return [0, -1];
-    if (d === 'down') return [0, 1];
-    if (d === 'left') return [-1, 0];
-    return [1, 0];
-  };
 
   for (const p of lastState.players) {
     if (!p.a) continue;

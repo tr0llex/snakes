@@ -18,6 +18,7 @@ import {
   cellSizeFor,
   clampToRoi,
   decayShake,
+  dirVec,
   followCamera,
   viewRectOf,
   visibleBounds
@@ -198,4 +199,37 @@ test('ROI, не пересекающийся с экраном, даёт пус�
 test('рамка обзора нормализуется в любом порядке границ', () => {
   const r = viewRectOf({ minX: 90, maxX: 10, minY: 80, maxY: 20 });
   assert.deepEqual(r, { minX: 10, maxX: 90, minY: 20, maxY: 80 });
+});
+
+// --- направление -> вектор смещения ------------------------------------------
+//
+// draw() раньше считал это дважды похожим, но не идентичным кодом (частицы
+// скорости — независимые тернарники dx/dy; отрисовка игроков — отдельная
+// локальная функция с иным поведением на нераспознанном значении). Сверяем
+// dirVec с обеими старыми реализациями на всех четырёх направлениях.
+
+const oldDirVecParticles = (dir) => [
+  dir === 'left' ? -1 : dir === 'right' ? 1 : 0,
+  dir === 'up' ? -1 : dir === 'down' ? 1 : 0
+];
+
+const oldDirVecPlayers = (d) => {
+  if (d === 'up') return [0, -1];
+  if (d === 'down') return [0, 1];
+  if (d === 'left') return [-1, 0];
+  return [1, 0];
+};
+
+test('dirVec совпадает с обеими старыми реализациями на всех известных направлениях', () => {
+  for (const d of ['up', 'down', 'left', 'right']) {
+    assert.deepEqual(dirVec(d), oldDirVecParticles(d), `частицы скорости: ${d}`);
+    assert.deepEqual(dirVec(d), oldDirVecPlayers(d), `отрисовка игроков: ${d}`);
+  }
+});
+
+test('dirVec: нераспознанное значение — нулевой вектор, а не тихий откат на "право"', () => {
+  // DIR_NAMES[d] || 'right' в разборе протокола уже гарантирует один из 4
+  // вариантов на входе — это защита на случай будущего разъезда контракта.
+  assert.deepEqual(dirVec('unknown'), [0, 0]);
+  assert.deepEqual(dirVec(undefined), [0, 0]);
 });
